@@ -1,5 +1,6 @@
 import sys
 import ctypes
+import math
 try:
     import sdl2
 except ImportError:
@@ -150,6 +151,14 @@ class Canvas:
         ymin = min(y0, y1, y2)
         ymax = max(y0, y1, y2)
 
+        # Clamping horizontal
+        xmin = max(0, min(xmin, self.width - 1))
+        xmax = max(0, min(xmax, self.width - 1))
+
+        # Clamping vertical
+        ymin = max(0, min(ymin, self.height - 1))
+        ymax = max(0, min(ymax, self.height - 1))
+
         for y in range(ymin, ymax + 1):
             for x in range(xmin, xmax + 1):
 
@@ -161,6 +170,192 @@ class Canvas:
                     (w1 <= 0 and w2 <= 0 and w3 <= 0)):
 
                     self.pixel(x, y, r, g, b)
+
+    def poligono(self, vertices, r, g, b):
+        for i in range(len(vertices)):
+            proximo = (i + 1) % len(vertices)
+
+            x0, y0 = vertices[i]
+            x1, y1 = vertices[proximo]
+
+            self.linha(x0, y0, x1, y1, r, g, b)
+
+    def poligono_preenchido(self, vertices, r, g, b):
+        v0 = vertices[0]
+
+        for i in range(1, len(vertices) - 1):
+            v1 = vertices[i]
+            v2 = vertices[i + 1]
+
+            self.triangulo_preenchido(
+                v0[0], v0[1],
+                v1[0], v1[1],
+                v2[0], v2[1],
+                r, g, b
+            )
+
+    def translacionar(self, vertices, dx, dy):
+        novos_vertices = []
+
+        for x, y in vertices:
+            novos_vertices.append((x + dx, y + dy))
+
+        return novos_vertices
+
+
+    def escalar(self, vertices, sx, sy):
+        novos_vertices = []
+
+        for x, y in vertices:
+            novos_vertices.append((
+                round(x * sx),
+                round(y * sy)
+            ))
+
+        return novos_vertices
+
+
+    def rotacionar(self, vertices, angulo_graus):
+        angulo = math.radians(angulo_graus)
+
+        cos_a = math.cos(angulo)
+        sin_a = math.sin(angulo)
+
+        novos_vertices = []
+
+        for x, y in vertices:
+            novo_x = x * cos_a - y * sin_a
+            novo_y = x * sin_a + y * cos_a
+
+            novos_vertices.append((
+                round(novo_x),
+                round(novo_y)
+            ))
+
+        return novos_vertices
+
+    def aplicar_matriz(self, matriz, vertices):
+        novos_vertices = []
+
+        for x, y in vertices:
+            novo_x = (
+                matriz[0][0] * x +
+                matriz[0][1] * y +
+                matriz[0][2]
+            )
+
+            novo_y = (
+                matriz[1][0] * x +
+                matriz[1][1] * y +
+                matriz[1][2]
+            )
+
+            novos_vertices.append((
+                round(novo_x),
+                round(novo_y)
+            ))
+
+        return novos_vertices
+
+    def multiplicar_matrizes(self, A, B):
+        C = [
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0]
+        ]
+
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    C[i][j] += A[i][k] * B[k][j]
+
+        return C
+
+
+    def criar_matriz_translacao(self, dx, dy):
+        return [
+            [1, 0, dx],
+            [0, 1, dy],
+            [0, 0, 1]
+        ]
+
+
+    def criar_matriz_escala(self, sx, sy):
+        return [
+            [sx, 0, 0],
+            [0, sy, 0],
+            [0, 0, 1]
+        ]
+
+
+    def criar_matriz_rotacao(self, angulo_graus):
+        angulo = math.radians(angulo_graus)
+
+        cos_a = math.cos(angulo)
+        sin_a = math.sin(angulo)
+
+        return [
+            [cos_a, -sin_a, 0],
+            [sin_a, cos_a, 0],
+            [0, 0, 1]
+        ]
+
+    def criar_matriz_camera(self):
+        M_escala = self.criar_matriz_escala(1, -1)
+
+        M_translacao = self.criar_matriz_translacao(
+            self.width // 2,
+            self.height // 2
+        )
+
+        M_camera = self.multiplicar_matrizes(
+            M_translacao,
+            M_escala
+        )
+
+        return M_camera
+
+    def aplicar_antialiasing(self):
+        novo_framebuffer = bytearray(self.width * self.height * 4)
+
+        # Ignora a borda de 1 pixel
+        for y in range(1, self.height - 1):
+            for x in range(1, self.width - 1):
+
+                soma_r = 0
+                soma_g = 0
+                soma_b = 0
+
+                # Percorre os 9 pixels ao redor de (x, y)
+                for dy in range(-1, 2):
+                    for dx in range(-1, 2):
+
+                        vizinho_x = x + dx
+                        vizinho_y = y + dy
+
+                        indice = (
+                            (vizinho_y * self.width + vizinho_x) * 4
+                        )
+
+                        soma_r += self.framebuffer[indice]
+                        soma_g += self.framebuffer[indice + 1]
+                        soma_b += self.framebuffer[indice + 2]
+
+                # Calcula a média dos 9 pixels
+                media_r = soma_r // 9
+                media_g = soma_g // 9
+                media_b = soma_b // 9
+
+                # Índice do pixel atual no novo framebuffer
+                indice = (y * self.width + x) * 4
+
+                novo_framebuffer[indice] = media_r
+                novo_framebuffer[indice + 1] = media_g
+                novo_framebuffer[indice + 2] = media_b
+                novo_framebuffer[indice + 3] = 255
+
+        # Substitui o framebuffer antigo
+        self.framebuffer = novo_framebuffer
 
     def update(self):
         sdl2.SDL_UpdateTexture(
@@ -192,27 +387,19 @@ if __name__ == "__main__":
 
     screen.retangulo_preenchido(
         0, 0,
-        screen.width, screen.height,
-        135, 206, 235
-    )
-
-    screen.retangulo_preenchido(
-        300, 300,
-        200, 200,
-        255, 215, 0
-    )
-
-    screen.retangulo_preenchido(
-        375, 400,
-        50, 100,
-        139, 69, 19
+        screen.width,
+        screen.height,
+        0, 0, 0
     )
 
     screen.triangulo_preenchido(
-        300, 300,
-        500, 300,
-        400, 150,
-        220, 20, 60
+        100, 100,
+        700, 150,
+        400, 550,
+        255, 255, 255
     )
+
+    # Ative/desative para comparar
+    screen.aplicar_antialiasing()
 
     screen.wait_for_close()
